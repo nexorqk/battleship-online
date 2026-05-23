@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: battleship-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: battleship
+    ports:
+      - "5432:5432"
+    volumes:
+      - battleship_pg_data:/var/lib/postgresql/data
+
+volumes:
+  battleship_pg_data:
