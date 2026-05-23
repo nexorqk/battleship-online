@@ -282,7 +282,7 @@ function isContinuous(cells: Cell[]): boolean {
 
   const sequence = allSameX ? ys : allSameY ? xs : [];
 
-  return sequence.every((value, index) => index === 0 || value === sequence[index - 1] + 1);
+  return sequence.every((value, index) => index === 0 || value === (sequence[index - 1] ?? 0) + 1);
 }
 
 function resetShip(ship: Ship): Ship {
