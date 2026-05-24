@@ -10,6 +10,11 @@ type BoardProps = {
   myReady?: boolean;
   enemyReady?: boolean;
   onCellClick?: (cell: Cell) => void;
+  // Placement mode (only for own board during placing phase)
+  placementMode?: boolean;
+  previewCells?: Cell[];
+  previewValid?: boolean;
+  onCellHover?: (cell: Cell | null) => void;
 };
 
 const COL_LABELS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
@@ -24,6 +29,10 @@ export function Board({
   myReady,
   enemyReady,
   onCellClick,
+  placementMode = false,
+  previewCells = [],
+  previewValid = true,
+  onCellHover,
 }: BoardProps) {
   const shotMap = new Map<string, ShotRecord>();
   for (const shot of shots) {
@@ -37,10 +46,13 @@ export function Board({
     }
   }
 
+  const previewSet = new Set(previewCells.map((c) => `${c.x}:${c.y}`));
+
   function getCellState(x: number, y: number) {
     const key = `${x}:${y}`;
     const shot = shotMap.get(key);
     const hasShip = shipCellSet.has(key);
+    const isPreview = previewSet.has(key);
 
     if (shot) {
       if (shot.result === "miss") return "miss";
@@ -49,6 +61,7 @@ export function Board({
     }
 
     if (hasShip) return "ship";
+    if (isPreview) return previewValid ? "preview-valid" : "preview-invalid";
     return "empty";
   }
 
@@ -95,9 +108,13 @@ export function Board({
             {COL_LABELS.map((_, x) => {
               const state = getCellState(x, y);
               const label = cellLabel(state);
-              // A cell is clickable only on the enemy board, when the board is
-              // not disabled (game active + your turn), and the cell is empty.
-              const isClickable = isEnemy && !disabled && state === "empty";
+
+              // In placement mode, own board cells are clickable if empty or already a ship
+              const isInPlacementMode = placementMode && !isEnemy;
+              // During gameplay, only enemy empty cells when it's your turn
+              const isCombatClickable = isEnemy && !disabled && state === "empty";
+
+              const isClickable = isInPlacementMode || isCombatClickable;
 
               const classNames = [
                 "cell",
@@ -114,6 +131,11 @@ export function Board({
                   className={classNames}
                   disabled={!isClickable}
                   onClick={() => onCellClick?.({ x, y })}
+                  onMouseEnter={() => onCellHover?.({ x, y })}
+                  onMouseLeave={() => {
+                    // Only clear hover if we're in placement mode (leave tracking)
+                    if (placementMode) onCellHover?.(null);
+                  }}
                   aria-label={`${COL_LABELS[x]}${rowLabel}${state !== "empty" ? `, ${state}` : ""}`}
                   title={`${COL_LABELS[x]}${rowLabel}`}
                   type="button"
