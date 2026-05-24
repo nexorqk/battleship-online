@@ -556,7 +556,7 @@ export function GamePage() {
               <button
                 className="btn-action primary-action"
                 onClick={handleSubmitFleet}
-                disabled={placedShips.length === 0}
+                disabled={!roster.every((s) => s.placed) || pendingReady}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <polyline points="20 6 9 17 4 12" />

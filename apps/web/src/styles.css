@@ -505,6 +505,18 @@ a {
   transform: scale(0.97);
 }
 
+.btn-action:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-action:disabled:hover {
+  background: var(--color-slate);
+  border-color: transparent;
+  box-shadow: none;
+}
+
 .btn-action.primary-action {
   background: var(--color-teal);
   color: var(--color-navy-black);
@@ -513,6 +525,14 @@ a {
 .btn-action.primary-action:hover {
   background: #2cc4b0;
   box-shadow: 0 4px 16px var(--color-teal-glow);
+}
+
+.btn-action.primary-action:disabled,
+.btn-action.primary-action:disabled:hover {
+  background: var(--color-slate);
+  color: var(--color-white);
+  opacity: 0.4;
+  box-shadow: none;
 }
 
 /* Turn indicator */
