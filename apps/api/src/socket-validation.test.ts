@@ -52,4 +52,69 @@ describe("socket payload validation", () => {
       expect(validationErrorMessage(error)).toContain("gameId");
     }
   });
+
+  it("rejects ships:place with a ship missing an id", () => {
+    expect(() =>
+      parseSocketPayload("shipsPlace", {
+        gameId: "game-1",
+        playerToken: "token-a",
+        ships: [{ id: "", cells: [{ x: 0, y: 0 }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects ships:place with out-of-board cells", () => {
+    expect(() =>
+      parseSocketPayload("shipsPlace", {
+        gameId: "game-1",
+        playerToken: "token-a",
+        ships: [{ id: "s1", cells: [{ x: 10, y: 0 }] }],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects ships:place with too many ships", () => {
+    expect(() =>
+      parseSocketPayload("shipsPlace", {
+        gameId: "game-1",
+        playerToken: "token-a",
+        ships: Array.from({ length: 11 }, (_, i) => ({
+          id: `s${i}`,
+          cells: [{ x: 0, y: 0 }],
+        })),
+      }),
+    ).toThrow();
+  });
+
+  it("rejects shot:submit with negative coordinates", () => {
+    expect(() =>
+      parseSocketPayload("shotSubmit", {
+        gameId: "game-1",
+        playerToken: "token-a",
+        target: { x: -1, y: 0 },
+        expectedVersion: 3,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects shot:submit with coordinates beyond board size", () => {
+    expect(() =>
+      parseSocketPayload("shotSubmit", {
+        gameId: "game-1",
+        playerToken: "token-a",
+        target: { x: 0, y: 10 },
+        expectedVersion: 3,
+      }),
+    ).toThrow();
+  });
+
+  it("rejects game:join with missing fields", () => {
+    expect(() => parseSocketPayload("gameJoin", {})).toThrow();
+    expect(() =>
+      parseSocketPayload("gameJoin", { gameId: "game-1" }),
+    ).toThrow();
+    expect(() =>
+      parseSocketPayload("gameJoin", { playerToken: "token-a" }),
+    ).toThrow();
+  });
 });

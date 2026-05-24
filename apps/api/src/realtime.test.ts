@@ -95,6 +95,72 @@ describe("acceptShotSubmission", () => {
     expect(mockTx.shot.create).not.toHaveBeenCalled();
     expect(mockTx.game.update).not.toHaveBeenCalled();
   });
+
+  it("rejects shots with an unknown player token", async () => {
+    mockTx.game.findUniqueOrThrow.mockResolvedValue({
+      id: "game-1",
+      playerAId: "token-a",
+      playerBId: "token-b",
+      version: 2,
+      state: activeState(),
+    });
+
+    await expect(
+      acceptShotSubmission({
+        gameId: "game-1",
+        playerToken: "unknown-token",
+        target: { x: 9, y: 9 },
+        expectedVersion: 2,
+      }),
+    ).rejects.toThrow("Player does not belong to this game");
+
+    expect(mockTx.shot.create).not.toHaveBeenCalled();
+    expect(mockTx.game.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects shots when it is not the player's turn", async () => {
+    mockTx.game.findUniqueOrThrow.mockResolvedValue({
+      id: "game-1",
+      playerAId: "token-a",
+      playerBId: "token-b",
+      version: 2,
+      state: activeState(),
+    });
+
+    await expect(
+      acceptShotSubmission({
+        gameId: "game-1",
+        playerToken: "token-b",
+        target: { x: 9, y: 9 },
+        expectedVersion: 2,
+      }),
+    ).rejects.toThrow("Not your turn");
+
+    expect(mockTx.shot.create).not.toHaveBeenCalled();
+    expect(mockTx.game.update).not.toHaveBeenCalled();
+  });
+
+  it("rejects duplicate shots at the same cell", async () => {
+    mockTx.game.findUniqueOrThrow.mockResolvedValue({
+      id: "game-1",
+      playerAId: "token-a",
+      playerBId: "token-b",
+      version: 2,
+      state: stateWithDuplicateShot(),
+    });
+
+    await expect(
+      acceptShotSubmission({
+        gameId: "game-1",
+        playerToken: "token-a",
+        target: { x: 9, y: 9 },
+        expectedVersion: 2,
+      }),
+    ).rejects.toThrow("already been shot");
+
+    expect(mockTx.shot.create).not.toHaveBeenCalled();
+    expect(mockTx.game.update).not.toHaveBeenCalled();
+  });
 });
 
 function activeState(): GameState {
@@ -111,6 +177,25 @@ function activeState(): GameState {
         ready: true,
         ships: [{ id: "b1", cells: [{ x: 0, y: 0 }], hits: [], sunk: false }],
         shotsReceived: [],
+      },
+    },
+  };
+}
+
+function stateWithDuplicateShot(): GameState {
+  return {
+    phase: "active",
+    currentTurn: "playerA",
+    boards: {
+      playerA: {
+        ready: true,
+        ships: [{ id: "a1", cells: [{ x: 0, y: 0 }], hits: [], sunk: false }],
+        shotsReceived: [],
+      },
+      playerB: {
+        ready: true,
+        ships: [{ id: "b1", cells: [{ x: 0, y: 0 }], hits: [], sunk: false }],
+        shotsReceived: [{ target: { x: 9, y: 9 }, result: "miss" }],
       },
     },
   };

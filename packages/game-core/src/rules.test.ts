@@ -130,6 +130,101 @@ describe("submitShot", () => {
     expect(miss.result).toBe("miss");
     expect(miss.state.currentTurn).toBe("playerB");
   });
+
+  it("rejects shots outside the board", () => {
+    let state = createInitialState();
+    state = markSecondPlayerJoined(state);
+    state = placeShips(state, "playerA", validShips);
+    state = placeShips(state, "playerB", validShips);
+    state = markReady(state, "playerA");
+    state = markReady(state, "playerB");
+
+    expect(() => submitShot(state, "playerA", { x: 10, y: 0 })).toThrow(
+      "Target is outside the board",
+    );
+    expect(() => submitShot(state, "playerA", { x: 0, y: 10 })).toThrow(
+      "Target is outside the board",
+    );
+  });
+
+  it("rejects duplicate shots", () => {
+    let state = createInitialState();
+    state = markSecondPlayerJoined(state);
+    state = placeShips(state, "playerA", validShips);
+    state = placeShips(state, "playerB", validShips);
+    state = markReady(state, "playerA");
+    state = markReady(state, "playerB");
+
+    // Hit at (0,0) keeps the turn with playerA, so we can test duplicate detection
+    const first = submitShot(state, "playerA", { x: 0, y: 0 });
+    expect(first.result).toBe("hit");
+    expect(() => submitShot(first.state, "playerA", { x: 0, y: 0 })).toThrow(
+      "This cell has already been shot",
+    );
+  });
+
+  it("rejects shots when it is not the player's turn", () => {
+    let state = createInitialState();
+    state = markSecondPlayerJoined(state);
+    state = placeShips(state, "playerA", validShips);
+    state = placeShips(state, "playerB", validShips);
+    state = markReady(state, "playerA");
+    state = markReady(state, "playerB");
+
+    // A shoots and misses, turn switches to B
+    const miss = submitShot(state, "playerA", { x: 9, y: 9 });
+    expect(miss.state.currentTurn).toBe("playerB");
+
+    expect(() => submitShot(miss.state, "playerA", { x: 8, y: 8 })).toThrow(
+      "Not your turn",
+    );
+  });
+
+  it("rejects shots when the game is not active", () => {
+    const state = createInitialState();
+    expect(() => submitShot(state, "playerA", { x: 0, y: 0 })).toThrow(
+      "Game is not active",
+    );
+  });
+
+  it("finishes the game when all enemy ships are sunk", () => {
+    let state = createInitialState();
+    state = markSecondPlayerJoined(state);
+    state = placeShips(state, "playerA", validShips);
+    state = placeShips(state, "playerB", validShips);
+    state = markReady(state, "playerA");
+    state = markReady(state, "playerB");
+
+    // All cells occupied by playerB's fleet
+    const allCells = validShips.flatMap((s) => s.cells);
+    expect(allCells).toHaveLength(20);
+
+    // Fire at every occupied cell; hits keep the turn, so A can sink everything
+    for (let i = 0; i < allCells.length; i++) {
+      const target = allCells[i];
+      const outcome = submitShot(state, "playerA", target);
+      state = outcome.state;
+
+      if (i === allCells.length - 1) {
+        expect(outcome.result).toBe("sunk");
+        expect(state.phase).toBe("finished");
+        expect(state.winner).toBe("playerA");
+        expect(state.currentTurn).toBe("playerA");
+      } else {
+        expect(state.phase).toBe("active");
+        expect(state.winner).toBeUndefined();
+      }
+    }
+
+    // Verify player views in finished state
+    const playerAView = createPlayerView(state, "playerA");
+    expect(playerAView.phase).toBe("finished");
+    expect(playerAView.winner).toBe("playerA");
+
+    const playerBView = createPlayerView(state, "playerB");
+    expect(playerBView.phase).toBe("finished");
+    expect(playerBView.winner).toBe("playerA");
+  });
 });
 
 function ship(id: string, cells: [number, number][]): Ship {

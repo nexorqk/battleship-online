@@ -98,6 +98,92 @@ test.describe("Battleship full game flow", () => {
     await contextB.close();
   });
 
+  test("players can play a game to completion", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+
+    // --- Setup: create and join ---
+    await pageA.goto("/");
+    await pageA.waitForSelector("text=Create Game");
+    await pageA.click("text=Create Game");
+    await pageA.waitForURL(/\/game\//);
+    const gameUrl = pageA.url();
+
+    await pageB.goto(gameUrl);
+    await pageA.waitForSelector("text=PLACING");
+    await pageB.waitForSelector("text=PLACING");
+
+    // --- Auto-place ships deterministically ---
+    await pageA.locator("button", { hasText: "Auto-place" }).click();
+    await pageB.locator("button", { hasText: "Auto-place" }).click();
+
+    await expect(pageA.locator("text=10 / 10 placed")).toBeVisible();
+    await expect(pageB.locator("text=10 / 10 placed")).toBeVisible();
+
+    // --- Ready up ---
+    await pageA.locator("button", { hasText: "Ready" }).click();
+    await pageB.locator("button", { hasText: "Ready" }).click();
+
+    await pageA.waitForSelector("text=YOUR TURN");
+    await pageB.waitForSelector("text=OPPONENT");
+
+    // Give the frontend a moment to settle the final game view version
+    await pageA.waitForTimeout(1000);
+
+    // --- Sink all of Player B's ships ---
+    // Player B uses createAutoFleet(1). Only s4 and s3a use offset;
+    // the remaining ships have fixed coordinates.
+    const bFleetCells = [
+      { x: 0, y: 1 }, { x: 1, y: 1 }, { x: 2, y: 1 }, { x: 3, y: 1 },
+      { x: 0, y: 3 }, { x: 1, y: 3 }, { x: 2, y: 3 },
+      { x: 4, y: 0 }, { x: 4, y: 1 }, { x: 4, y: 2 },
+      { x: 6, y: 0 }, { x: 6, y: 1 },
+      { x: 8, y: 0 }, { x: 9, y: 0 },
+      { x: 0, y: 5 }, { x: 1, y: 5 },
+      { x: 3, y: 5 }, { x: 5, y: 5 }, { x: 7, y: 5 }, { x: 9, y: 5 },
+    ];
+
+    for (const cell of bFleetCells) {
+      const label = `${String.fromCharCode(65 + cell.x)}${cell.y + 1}`;
+      const btn = pageA.locator(
+        `section.enemy-board button[aria-label="${label}"]`,
+      );
+      await btn.click();
+      // Wait for the shot-result notification so we know the server accepted it
+      await pageA.waitForSelector(
+        `.notif-stack .notif:has-text(" at ${label}")`,
+        { timeout: 5000 },
+      );
+    }
+
+    // --- Verify finished state on both players ---
+    await pageA.waitForSelector("text=Winner: YOU");
+    await pageB.waitForSelector("text=Winner: OPPONENT");
+
+    // Verify game-over overlays (target specific heading to avoid matching notification)
+    await expect(pageA.locator("h2.overlay-title.victory")).toBeVisible();
+    await expect(pageB.locator("h2.overlay-title.defeat")).toBeVisible();
+
+    // Verify final notifications (scoped to notification stack to avoid overlay heading)
+    await expect(
+      pageA.locator(".notif-stack .notif:has-text('Victory!')"),
+    ).toBeVisible();
+    await expect(
+      pageB.locator(".notif-stack .notif:has-text('Defeat')"),
+    ).toBeVisible();
+
+    // Version should be high (initial + placing updates + 20 shots)
+    const versionA = await pageA.locator(".topbar-version").textContent();
+    const versionB = await pageB.locator(".topbar-version").textContent();
+    expect(versionA).toMatch(/v\d+/);
+    expect(versionB).toMatch(/v\d+/);
+
+    await contextA.close();
+    await contextB.close();
+  });
+
   test("players can reload and resume an active game", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
