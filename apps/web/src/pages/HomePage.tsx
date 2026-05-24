@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createGame } from "../api";
 import { storePlayer } from "../storage";
+import { ThemeSelector } from "../components/ThemeSelector";
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -72,6 +73,8 @@ export function HomePage() {
 
         {error && <p className="home-error">{error}</p>}
       </div>
+
+      <ThemeSelector />
     </main>
   );
 }

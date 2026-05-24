@@ -6,7 +6,8 @@
 
 /* ---------- Design System ---------- */
 
-:root {
+:root,
+[data-theme="dark"] {
   /* Palette */
   --color-navy-black: #050b17;
   --color-navy-deep: #070d1a;
@@ -47,6 +48,60 @@
   --radius-md: 10px;
   --radius-lg: 16px;
   --radius-xl: 20px;
+}
+
+/* ---------- Light Theme ---------- */
+
+[data-theme="light"] {
+  --color-navy-black: #f8fafc;
+  --color-navy-deep: #ffffff;
+  --color-navy: #f1f5f9;
+  --color-navy-mid: #e2e8f0;
+  --color-slate: #cbd5e1;
+  --color-slate-light: #94a3b8;
+
+  --color-teal: #0d9488;
+  --color-teal-dim: rgba(13, 148, 136, 0.1);
+  --color-teal-glow: rgba(13, 148, 136, 0.2);
+
+  --color-amber: #d97706;
+  --color-amber-dim: rgba(217, 119, 6, 0.1);
+  --color-amber-glow: rgba(217, 119, 6, 0.2);
+
+  --color-red: #dc2626;
+  --color-red-dim: rgba(220, 38, 38, 0.1);
+  --color-red-glow: rgba(220, 38, 38, 0.2);
+
+  --color-green: #16a34a;
+  --color-green-dim: rgba(22, 163, 74, 0.1);
+
+  --color-white: #0f172a;
+  --color-white-dim: rgba(15, 23, 42, 0.6);
+  --color-muted: #64748b;
+  --color-glass: rgba(255, 255, 255, 0.85);
+  --color-glass-border: rgba(13, 148, 136, 0.15);
+}
+
+html[data-theme="light"] body {
+  background-image:
+    radial-gradient(ellipse at 20% 50%, rgba(13, 148, 136, 0.04) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 50%, rgba(217, 119, 6, 0.03) 0%, transparent 60%),
+    repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0, 0, 0, 0.04) 39px, rgba(0, 0, 0, 0.04) 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(0, 0, 0, 0.04) 39px, rgba(0, 0, 0, 0.04) 40px);
+}
+
+html[data-theme="light"] .home-page::before {
+  background:
+    radial-gradient(circle at 50% 40%, rgba(13, 148, 136, 0.06) 0%, transparent 50%),
+    radial-gradient(circle at 50% 60%, rgba(217, 119, 6, 0.03) 0%, transparent 40%);
+}
+
+html[data-theme="light"] .btn-primary {
+  color: #ffffff;
+}
+
+html[data-theme="light"] .home-error {
+  color: #b91c1c;
 }
 
 /* ---------- Reset & Base ---------- */
@@ -1563,4 +1618,50 @@ a {
   .cell {
     font-size: 9px;
   }
+}
+
+/* ---------- Theme Selector ---------- */
+
+.theme-selector {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--color-navy-mid);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+}
+
+.home-page .theme-selector {
+  display: flex;
+  justify-content: center;
+  margin-top: 24px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-white-dim);
+  font-family: var(--font-display);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: none;
+  line-height: 1;
+}
+
+.theme-option:hover {
+  color: var(--color-white);
+}
+
+.theme-option.active {
+  background: var(--color-glass);
+  color: var(--color-teal);
 }

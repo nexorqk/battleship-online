@@ -7,6 +7,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet" />
+    <script>
+      (function() {
+        var key = 'battleship-theme';
+        var theme = 'system';
+        try { var s = localStorage.getItem(key); if (s === 'light' || s === 'dark' || s === 'system') theme = s; } catch(e) {}
+        if (theme === 'system') {
+          var mq = window.matchMedia('(prefers-color-scheme: dark)');
+          document.documentElement.setAttribute('data-theme', mq.matches ? 'dark' : 'light');
+        } else {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
