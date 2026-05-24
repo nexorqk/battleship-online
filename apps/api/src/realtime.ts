@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { Server, type Socket } from "socket.io";
 import {
+  BOARD_SIZE,
   createPlayerView,
   markReady,
   placeShips,
@@ -15,6 +16,8 @@ import { prisma } from "./db";
 import { env } from "./env";
 import { getRoleForToken, getState } from "./game-record";
 
+const TURN_TIMEOUT_MS = 65_000; // 65 seconds (gives buffer over client's 60s display)
+
 type InterServerEvents = Record<string, never>;
 type SocketData = {
   gameId?: string;
@@ -23,6 +26,125 @@ type SocketData = {
 };
 
 type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>;
+
+// ----- Turn Timer -----
+
+const turnTimers = new Map<string, NodeJS.Timeout>();
+
+function clearTurnTimer(gameId: string): void {
+  const existing = turnTimers.get(gameId);
+  if (existing) {
+    clearTimeout(existing);
+    turnTimers.delete(gameId);
+  }
+}
+
+async function autoFireShot(
+  io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
+  gameId: string,
+): Promise<void> {
+  try {
+    const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+
+    if (game.status !== "active") return; // Game already ended
+
+    const state = getState(game);
+    const currentPlayer = state.currentTurn;
+    const defender = currentPlayer === "playerA" ? "playerB" : "playerA";
+    const defenderBoard = state.boards[defender];
+
+    // Build a set of cells already shot
+    const shotCells = new Set<string>();
+    for (const shot of defenderBoard.shotsReceived) {
+      shotCells.add(`${shot.target.x}:${shot.target.y}`);
+    }
+
+    // Find all valid cells
+    const validCells: Cell[] = [];
+    for (let x = 0; x < BOARD_SIZE; x++) {
+      for (let y = 0; y < BOARD_SIZE; y++) {
+        if (!shotCells.has(`${x}:${y}`)) {
+          validCells.push({ x, y });
+        }
+      }
+    }
+
+    if (validCells.length === 0) return; // Board full — shouldn't happen
+
+    // Pick a random cell
+    const target = validCells[Math.floor(Math.random() * validCells.length)]!;
+
+    // Process the shot
+    const outcome = submitShot(state, currentPlayer, target);
+    const nextVersion = game.version + 1;
+
+    await prisma.shot.create({
+      data: {
+        gameId,
+        playerId: `timer-auto-${currentPlayer}`,
+        x: target.x,
+        y: target.y,
+        result: outcome.result,
+        turnNumber: nextVersion,
+      },
+    });
+
+    await prisma.game.update({
+      where: { id: gameId },
+      data: {
+        state: outcome.state as never,
+        status: outcome.state.phase,
+        winner: outcome.winner,
+        version: nextVersion,
+      },
+    });
+
+    // Notify players
+    io.to(roomName(gameId)).emit("shot:result", {
+      target,
+      result: outcome.result,
+      nextTurn: outcome.state.currentTurn,
+      version: nextVersion,
+    });
+
+    await emitViews(io, gameId);
+
+    if (outcome.winner) {
+      io.to(roomName(gameId)).emit("game:finished", { winner: outcome.winner });
+    } else {
+      // Schedule timer for the next turn
+      scheduleTurnTimer(io, gameId);
+    }
+  } catch (error) {
+    console.error(`[turn-timer] Auto-shot failed for game ${gameId}:`, errorMessage(error));
+  }
+}
+
+function scheduleTurnTimer(
+  io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
+  gameId: string,
+): void {
+  clearTurnTimer(gameId);
+  const timer = setTimeout(() => autoFireShot(io, gameId), TURN_TIMEOUT_MS);
+  turnTimers.set(gameId, timer);
+}
+
+/** Start the turn timer if the game is currently in "active" phase */
+async function scheduleTurnTimerIfActive(
+  io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
+  gameId: string,
+): Promise<void> {
+  try {
+    const game = await prisma.game.findUniqueOrThrow({ where: { id: gameId } });
+    if (game.status === "active") {
+      scheduleTurnTimer(io, gameId);
+    }
+  } catch {
+    // Game not found — nothing to schedule
+  }
+}
+
+// ----- Realtime Setup -----
 
 export function registerRealtime(app: FastifyInstance): Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData> {
   const io = new Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>(app.server, {
@@ -46,6 +168,9 @@ export function registerRealtime(app: FastifyInstance): Server<ClientToServerEve
           ...createPlayerView(getState(game), role),
           version: game.version,
         });
+
+        // Ensure turn timer is running if game is active
+        await scheduleTurnTimerIfActive(io, gameId);
       } catch (error) {
         socket.emit("move:rejected", { reason: errorMessage(error) });
       }
@@ -64,6 +189,8 @@ export function registerRealtime(app: FastifyInstance): Server<ClientToServerEve
       try {
         await updateGameState(gameId, playerToken, (state, role) => markReady(state, role));
         await emitViews(io, gameId);
+        // Start turn timer if game just became active
+        await scheduleTurnTimerIfActive(io, gameId);
       } catch (error) {
         socket.emit("move:rejected", { reason: errorMessage(error) });
       }
@@ -121,7 +248,11 @@ export function registerRealtime(app: FastifyInstance): Server<ClientToServerEve
         await emitViews(io, gameId);
 
         if (shot.state.winner) {
+          clearTurnTimer(gameId);
           io.to(roomName(gameId)).emit("game:finished", { winner: shot.state.winner });
+        } else {
+          // Schedule timer for the next turn
+          scheduleTurnTimer(io, gameId);
         }
       } catch (error) {
         socket.emit("move:rejected", { reason: errorMessage(error) });

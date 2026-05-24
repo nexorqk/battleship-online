@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import { io, type Socket } from "socket.io-client";
-import type { Cell, PlayerGameView, Ship } from "@battleship/game-core";
+import { DEFAULT_FLEET, type Cell, type PlayerGameView, type Ship } from "@battleship/game-core";
 import type { ClientToServerEvents, ServerToClientEvents } from "@battleship/shared";
 import { joinGame } from "../api";
 import { SOCKET_URL } from "../config";
@@ -28,7 +28,110 @@ type Notification = {
 
 let notifId = 0;
 
+const TURN_TIMEOUT_SEC = 60;
+
+// ----- Game Over Overlay -----
+
+function GameOverOverlay({
+  won,
+  myShipsRemaining,
+  totalMyShips,
+  enemyShipsSunk,
+  totalEnemyShips,
+  onNewGame,
+}: {
+  won: boolean;
+  myShipsRemaining: number;
+  totalMyShips: number;
+  enemyShipsSunk: number;
+  totalEnemyShips: number;
+  onNewGame: () => void;
+}) {
+  return (
+    <div className="overlay-backdrop">
+      <div className="overlay-card">
+        <div className={`overlay-icon ${won ? "victory" : "defeat"}`}>
+          {won ? (
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5C7 4 7 7 6 9Z" />
+              <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5C17 4 17 7 18 9Z" />
+              <path d="M4 22h16" />
+              <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
+              <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
+              <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
+            </svg>
+          ) : (
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M16 16s-1.5-2-4-2-4 2-4 2" />
+              <line x1="9" y1="9" x2="9.01" y2="9" />
+              <line x1="15" y1="9" x2="15.01" y2="9" />
+            </svg>
+          )}
+        </div>
+
+        <h2 className={`overlay-title ${won ? "victory" : "defeat"}`}>
+          {won ? "VICTORY" : "DEFEAT"}
+        </h2>
+
+        <p className="overlay-subtitle">
+          {won
+            ? "You destroyed the enemy fleet!"
+            : "Your fleet has been destroyed."}
+        </p>
+
+        <div className="overlay-stats">
+          <div className="overlay-stat">
+            <span className="overlay-stat-value">{myShipsRemaining}</span>
+            <span className="overlay-stat-label">Your ships<br />remaining</span>
+          </div>
+          <div className="overlay-stat">
+            <span className="overlay-stat-value">{enemyShipsSunk}</span>
+            <span className="overlay-stat-label">Enemy ships<br />sunk</span>
+          </div>
+          <div className="overlay-stat">
+            <span className="overlay-stat-value">{totalMyShips - myShipsRemaining}</span>
+            <span className="overlay-stat-label">Your ships<br />lost</span>
+          </div>
+        </div>
+
+        <button className="btn-primary overlay-btn" onClick={onNewGame}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+          </svg>
+          New Game
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ----- Ship Status Badge -----
+
+function ShipStatusBadge({ sunk, total }: { sunk: number; total: number }) {
+  return (
+    <div className="ship-status">
+      <span className="ship-status-label">Ships sunk</span>
+      <span className="ship-status-value">
+        <span className="ship-status-current">{sunk}</span>
+        <span className="ship-status-sep">/</span>
+        <span className="ship-status-total">{total}</span>
+      </span>
+      <div className="ship-status-bar">
+        <div
+          className="ship-status-fill"
+          style={{ width: `${(sunk / total) * 100}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ===== Main Game Page =====
+
 export function GamePage() {
+  const navigate = useNavigate();
   const { gameId } = useParams<{ gameId: string }>();
   const [player, setPlayer] = useState<StoredPlayer | null>(() =>
     gameId ? getStoredPlayer(gameId) : null,
@@ -45,6 +148,11 @@ export function GamePage() {
   const [hoverCell, setHoverCell] = useState<Cell | null>(null);
   const [placedShips, setPlacedShips] = useState<Ship[]>([]);
   const [pendingReady, setPendingReady] = useState(false);
+
+  // Turn timer state
+  const [timeLeft, setTimeLeft] = useState(TURN_TIMEOUT_SEC);
+  const turnRef = useRef<string | null>(null);
+  const turnStartRef = useRef(Date.now());
 
   const inviteUrl = useMemo(() => window.location.href, []);
 
@@ -95,6 +203,8 @@ export function GamePage() {
   useEffect(() => {
     if (!gameId || !player) return;
 
+    let reconnected = false;
+
     const socket: GameSocket = io(SOCKET_URL, {
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
@@ -102,6 +212,11 @@ export function GamePage() {
     socketRef.current = socket;
 
     socket.on("connect", () => {
+      if (reconnected) {
+        pushNotif("Reconnected to game", "info");
+      }
+      reconnected = true;
+
       socket.emit("game:join", {
         gameId,
         playerToken: player.playerToken,
@@ -110,7 +225,6 @@ export function GamePage() {
 
     socket.on("game:view", (payload) => {
       setView(payload);
-      // If we had a pending ready (ships were just placed), send ready now
       if (pendingReady) {
         setPendingReady(false);
         socket.emit("player:ready", {
@@ -155,22 +269,8 @@ export function GamePage() {
   // Reset placement state when entering placing phase from server state
   useEffect(() => {
     if (view?.phase === "placing" && view.myBoard.ships.length > 0) {
-      // Ships already placed on server (e.g., after refresh or opponent's update)
-      // Sync local placedShips from the view
       setPlacedShips(view.myBoard.ships);
-      // Mark ships as placed in roster based on what's on the board
       const localRoster = createFleetRoster();
-      const remaining = [...view.myBoard.ships.map((s) => s.cells.length)];
-      let rosterIdx = 0;
-      for (const shipLen of localRoster.map((s) => s.length)) {
-        const matchIdx = remaining.indexOf(shipLen);
-        if (matchIdx !== -1) {
-          remaining.splice(matchIdx, 1);
-          localRoster[rosterIdx]!.placed = false; // already placed count via server
-        }
-        rosterIdx++;
-      }
-      // Simpler approach: just mark all ships that match as placed
       const shipLengthsOnBoard = view.myBoard.ships.map((s) => s.cells.length);
       for (const item of localRoster) {
         const idx = shipLengthsOnBoard.indexOf(item.length);
@@ -181,7 +281,6 @@ export function GamePage() {
       }
       setRoster(localRoster);
     } else if (view?.phase === "placing" && view.myBoard.ships.length === 0) {
-      // Fresh placing phase — reset
       setPlacedShips([]);
       setRoster(createFleetRoster());
       setSelectedShipIdx(null);
@@ -189,7 +288,50 @@ export function GamePage() {
     }
   }, [view?.phase, view?.myBoard.ships]);
 
-  // --- Placement handlers ---
+  // ---- Turn timer ----
+  useEffect(() => {
+    if (!view || view.phase !== "active") {
+      setTimeLeft(TURN_TIMEOUT_SEC);
+      return;
+    }
+
+    if (turnRef.current !== view.currentTurn) {
+      turnRef.current = view.currentTurn;
+      turnStartRef.current = Date.now();
+      setTimeLeft(TURN_TIMEOUT_SEC);
+    }
+  }, [view?.currentTurn, view?.phase]);
+
+  useEffect(() => {
+    if (!view || view.phase !== "active") return;
+
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - turnStartRef.current) / 1000);
+      const remaining = Math.max(0, TURN_TIMEOUT_SEC - elapsed);
+      setTimeLeft(remaining);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [view?.currentTurn, view?.phase]);
+
+  // ---- Derived computed stats ----
+  const enemyShipsSunk = useMemo(() => {
+    if (!view) return 0;
+    // Each "sunk" result in my shots = one enemy ship destroyed
+    const sunkShots = view.enemyBoard.myShots.filter((s) => s.result === "sunk");
+    // A ship can have multiple sunk records if multiple shots register sunk
+    // Actually, each ship is sunk exactly once. The sunk result appears once per ship.
+    return sunkShots.length;
+  }, [view?.enemyBoard.myShots]);
+
+  const myShipsRemaining = useMemo(() => {
+    if (!view) return 0;
+    return view.myBoard.ships.filter((s) => !s.sunk).length;
+  }, [view?.myBoard.ships]);
+
+  const totalShips = DEFAULT_FLEET.length; // 10
+
+  // ---- Handlers ----
 
   const handleSelectShip = useCallback((idx: number) => {
     setSelectedShipIdx((prev) => (prev === idx ? null : idx));
@@ -219,17 +361,14 @@ export function GamePage() {
       const nextPlaced = [...placedShips, newShip];
       setPlacedShips(nextPlaced);
 
-      // Mark ship as placed in roster
       const nextRoster = roster.map((s, i) =>
         i === selectedShipIdx ? { ...s, placed: true } : s,
       );
       setRoster(nextRoster);
 
-      // Auto-deselect if all ships placed
       if (nextRoster.every((s) => s.placed)) {
         setSelectedShipIdx(null);
       } else {
-        // Move selection to next unplaced ship
         const nextUnplaced = nextRoster.findIndex((s) => !s.placed);
         setSelectedShipIdx(nextUnplaced);
       }
@@ -238,32 +377,13 @@ export function GamePage() {
     [selectedShipIdx, roster, direction, placedShips],
   );
 
-  const handleCellHover = useCallback(
-    (cell: Cell | null) => {
-      setHoverCell(cell);
-    },
-    [],
-  );
-
-  const handleRemoveShip = useCallback(
-    (shipId: string) => {
-      const shipToRemove = placedShips.find((s) => s.id === shipId);
-      if (!shipToRemove) return;
-
-      setPlacedShips((prev) => prev.filter((s) => s.id !== shipId));
-      setRoster((prev) =>
-        prev.map((s) =>
-          s.id === shipId ? { ...s, placed: false } : s,
-        ),
-      );
-    },
-    [placedShips],
-  );
+  const handleCellHover = useCallback((cell: Cell | null) => {
+    setHoverCell(cell);
+  }, []);
 
   const handleAutoPlace = useCallback(() => {
     const fleet = createAutoFleet(player?.role === "playerA" ? 0 : 1);
     setPlacedShips(fleet);
-    // Mark all as placed in roster
     setRoster(createFleetRoster().map((s) => ({ ...s, placed: true })));
     setSelectedShipIdx(null);
     setHoverCell(null);
@@ -279,7 +399,6 @@ export function GamePage() {
       pushNotif("Place all ships before marking ready", "error");
       return;
     }
-    // Emit ships and mark pending ready
     setPendingReady(true);
     socketRef.current?.emit("ships:place", {
       gameId,
@@ -307,6 +426,10 @@ export function GamePage() {
       setTimeout(() => setCopied(false), 2000);
     });
   }, [inviteUrl]);
+
+  const handleNewGame = useCallback(() => {
+    navigate("/");
+  }, [navigate]);
 
   // Derive display state
   const canShoot = Boolean(
@@ -487,6 +610,26 @@ export function GamePage() {
             </>
           )}
         </p>
+
+        {/* Timer — only during active phase */}
+        {view.phase === "active" && (
+          <div className={`turn-timer ${timeLeft <= 10 ? "urgent" : ""}`}>
+            <svg className="timer-ring" viewBox="0 0 40 40" width="40" height="40">
+              <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.15" />
+              <circle
+                cx="20" cy="20" r="17"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeDasharray={`${(timeLeft / TURN_TIMEOUT_SEC) * 107} 107`}
+                transform="rotate(-90 20 20)"
+                className="timer-ring-fill"
+              />
+            </svg>
+            <span className="timer-text">{timeLeft}</span>
+          </div>
+        )}
       </div>
 
       {/* Notification toasts */}
@@ -552,9 +695,7 @@ export function GamePage() {
                         <span key={i} className="palette-ship-cell" />
                       ))}
                     </span>
-                    {ship.placed && (
-                      <span className="palette-ship-check">✓</span>
-                    )}
+                    {ship.placed && <span className="palette-ship-check">✓</span>}
                   </button>
                 ))}
               </div>
@@ -580,15 +721,34 @@ export function GamePage() {
           )}
         </div>
 
-        <Board
-          title="Enemy Waters"
-          shots={view.enemyBoard.myShots}
-          disabled={!canShoot}
-          isEnemy
-          enemyReady={view.enemyBoard.enemyReady}
-          onCellClick={handleShoot}
-        />
+        <div className="board-column">
+          <Board
+            title="Enemy Waters"
+            shots={view.enemyBoard.myShots}
+            disabled={!canShoot}
+            isEnemy
+            enemyReady={view.enemyBoard.enemyReady}
+            onCellClick={handleShoot}
+          />
+
+          {/* Ship status — during active/completed phase */}
+          {(view.phase === "active" || isFinished) && (
+            <ShipStatusBadge sunk={enemyShipsSunk} total={totalShips} />
+          )}
+        </div>
       </div>
+
+      {/* Game Over Overlay */}
+      {isFinished && (
+        <GameOverOverlay
+          won={view.winner === player.role}
+          myShipsRemaining={myShipsRemaining}
+          totalMyShips={totalShips}
+          enemyShipsSunk={enemyShipsSunk}
+          totalEnemyShips={totalShips}
+          onNewGame={handleNewGame}
+        />
+      )}
     </main>
   );
 }
