@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { nanoid } from "nanoid";
+import { Server } from "socket.io";
 import {
   createInitialState,
   createPlayerView,
@@ -8,8 +9,12 @@ import {
 import type { CreateGameResponse, JoinGameResponse } from "@battleship/shared";
 import { prisma } from "../db";
 import { getRoleForToken, getState } from "../game-record";
+import { emitViews } from "../realtime";
 
-export async function registerGameRoutes(app: FastifyInstance): Promise<void> {
+export async function registerGameRoutes(
+  app: FastifyInstance,
+  io: Server,
+): Promise<void> {
   app.post("/games", async (_request, reply): Promise<CreateGameResponse> => {
     const playerToken = nanoid(32);
     const state = createInitialState();
@@ -61,6 +66,9 @@ export async function registerGameRoutes(app: FastifyInstance): Promise<void> {
         },
       });
     });
+
+    // Notify Player A's sockets that the game phase has changed
+    await emitViews(io, game.id);
 
     reply.code(201);
 

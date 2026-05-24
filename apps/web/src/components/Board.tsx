@@ -1,3 +1,4 @@
+import React from "react";
 import type { Cell, Ship, ShotRecord } from "@battleship/game-core";
 
 type BoardProps = {
@@ -26,8 +27,7 @@ export function Board({
 }: BoardProps) {
   const shotMap = new Map<string, ShotRecord>();
   for (const shot of shots) {
-    const key = `${shot.target.x}:${shot.target.y}`;
-    shotMap.set(key, shot);
+    shotMap.set(`${shot.target.x}:${shot.target.y}`, shot);
   }
 
   const shipCellSet = new Set<string>();
@@ -52,7 +52,7 @@ export function Board({
     return "empty";
   }
 
-  function cellLabel(x: number, y: number, state: string): string {
+  function cellLabel(state: string): string {
     if (state === "miss") return "○";
     if (state === "hit" || state === "ship-hit") return "✕";
     if (state === "sunk") return "✕";
@@ -61,9 +61,7 @@ export function Board({
 
   return (
     <section className={`board-section ${isEnemy ? "enemy-board" : "my-board"}`}>
-      {isEnemy && (
-        <div className="radar-overlay" aria-hidden="true" />
-      )}
+      {isEnemy && <div className="radar-overlay" aria-hidden="true" />}
 
       <div className="board-header">
         <span className="board-title">
@@ -82,36 +80,30 @@ export function Board({
       </div>
 
       <div className="board-grid with-labels" role="grid" aria-label={title}>
-        {/* Corner */}
         <div className="coord-label corner" />
 
-        {/* Column labels */}
         {COL_LABELS.map((label) => (
           <div key={label} className="coord-label col-label">
             {label}
           </div>
         ))}
 
-        {/* Rows */}
         {ROW_LABELS.map((rowLabel, y) => (
-          <>
-            {/* Row label */}
-            <div key={`row-${y}`} className="coord-label row-label">
-              {rowLabel}
-            </div>
+          <React.Fragment key={`row-${y}`}>
+            <div className="coord-label row-label">{rowLabel}</div>
 
-            {/* Cells */}
             {COL_LABELS.map((_, x) => {
               const state = getCellState(x, y);
-              const label = cellLabel(x, y, state);
+              const label = cellLabel(state);
+              // A cell is clickable only on the enemy board, when the board is
+              // not disabled (game active + your turn), and the cell is empty.
+              const isClickable = isEnemy && !disabled && state === "empty";
 
               const classNames = [
                 "cell",
-                state === "empty" ? "" : state,
+                state !== "empty" ? state : "",
                 state === "ship" && !isEnemy ? "self" : "",
-                state === "ship" && isEnemy ? "" : "",
-                state === "empty" || (!isEnemy) || disabled ? "disabled" : "clickable",
-                (state === "miss" || state === "hit" || state === "ship-hit" || state === "sunk") ? "disabled" : "",
+                isClickable ? "clickable" : "disabled",
               ]
                 .filter(Boolean)
                 .join(" ");
@@ -120,7 +112,7 @@ export function Board({
                 <button
                   key={`${x}:${y}`}
                   className={classNames}
-                  disabled={disabled || !isEnemy || state !== "empty"}
+                  disabled={!isClickable}
                   onClick={() => onCellClick?.({ x, y })}
                   aria-label={`${COL_LABELS[x]}${rowLabel}${state !== "empty" ? `, ${state}` : ""}`}
                   title={`${COL_LABELS[x]}${rowLabel}`}
@@ -130,7 +122,7 @@ export function Board({
                 </button>
               );
             })}
-          </>
+          </React.Fragment>
         ))}
       </div>
     </section>

@@ -19,8 +19,8 @@ async function main(): Promise<void> {
     service: "battleship-api",
   }));
 
-  await registerGameRoutes(app);
-  registerRealtime(app);
+  const io = registerRealtime(app);
+  await registerGameRoutes(app, io);
 
   const close = async () => {
     await app.close();

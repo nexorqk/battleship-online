@@ -11,19 +11,41 @@ import { getStoredPlayer, storePlayer, type StoredPlayer } from "../storage";
 
 type GameSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+type Notification = {
+  id: number;
+  text: string;
+  kind: "info" | "error" | "success";
+};
+
+let notifId = 0;
+
 export function GamePage() {
   const { gameId } = useParams<{ gameId: string }>();
   const [player, setPlayer] = useState<StoredPlayer | null>(() =>
     gameId ? getStoredPlayer(gameId) : null,
   );
   const [view, setView] = useState<(PlayerGameView & { version: number }) | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [copied, setCopied] = useState(false);
   const socketRef = useRef<GameSocket | null>(null);
 
   const inviteUrl = useMemo(() => window.location.href, []);
 
-  // Join game if not already a player
+  const pushNotif = useCallback((text: string, kind: Notification["kind"] = "info") => {
+    const id = ++notifId;
+    setNotifications((prev) => [...prev.slice(-4), { id, text, kind }]);
+    if (kind !== "error") {
+      setTimeout(() => {
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+      }, 4000);
+    }
+  }, []);
+
+  const dismissNotif = useCallback((id: number) => {
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+  }, []);
+
+  // Join game via REST if not already a player
   useEffect(() => {
     if (!gameId || player) return;
 
@@ -41,19 +63,25 @@ export function GamePage() {
       })
       .catch((reason) => {
         if (cancelled) return;
-        setError(reason instanceof Error ? reason.message : "Failed to join game");
+        pushNotif(
+          reason instanceof Error ? reason.message : "Failed to join game",
+          "error",
+        );
       });
 
     return () => {
       cancelled = true;
     };
-  }, [gameId, player]);
+  }, [gameId, player, pushNotif]);
 
   // Socket.IO connection
   useEffect(() => {
     if (!gameId || !player) return;
 
-    const socket: GameSocket = io(SOCKET_URL);
+    const socket: GameSocket = io(SOCKET_URL, {
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
     socketRef.current = socket;
 
     socket.on("connect", () => {
@@ -65,18 +93,33 @@ export function GamePage() {
 
     socket.on("game:view", (payload) => {
       setView(payload);
-      setError(null);
     });
 
     socket.on("move:rejected", ({ reason }) => {
-      setError(reason);
+      pushNotif(reason, "error");
+    });
+
+    socket.on("shot:result", ({ target, result, nextTurn }) => {
+      const col = String.fromCharCode(65 + target.x);
+      const row = target.y + 1;
+      const labels: Record<string, string> = {
+        miss: "Miss",
+        hit: "Hit!",
+        sunk: "Sunk!",
+      };
+      pushNotif(`${labels[result] ?? result} at ${col}${row}`, "info");
+    });
+
+    socket.on("game:finished", ({ winner }) => {
+      const won = winner === player.role;
+      pushNotif(won ? "Victory! You sank the entire enemy fleet!" : "Defeat — your fleet was destroyed.", "success");
     });
 
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [gameId, player]);
+  }, [gameId, player, pushNotif]);
 
   const handlePlaceShips = useCallback(() => {
     if (!gameId || !player) return;
@@ -115,7 +158,7 @@ export function GamePage() {
     });
   }, [inviteUrl]);
 
-  // Derive state
+  // Derive display state
   const canShoot = Boolean(
     view &&
       player &&
@@ -128,7 +171,7 @@ export function GamePage() {
   const isPlacing = view?.phase === "placing";
   const isWaiting = view?.phase === "waiting";
 
-  // Root error — missing game ID
+  // Render helpers
   if (!gameId) {
     return (
       <main className="game-page">
@@ -140,7 +183,6 @@ export function GamePage() {
     );
   }
 
-  // Waiting to join
   if (!player) {
     return (
       <main className="game-page">
@@ -152,7 +194,6 @@ export function GamePage() {
     );
   }
 
-  // Game not loaded yet
   if (!view) {
     return (
       <main className="game-page">
@@ -179,15 +220,26 @@ export function GamePage() {
             <span className="topbar-tag">
               Role: <strong>{player.role === "playerA" ? "Player 1" : "Player 2"}</strong>
             </span>
-            <span className={`topbar-tag ${isFinished ? "winner-tag" : isMyTurn ? "turn-tag" : ""}`}>
+            <span
+              className={`topbar-tag ${isFinished ? "winner-tag" : isMyTurn ? "turn-tag" : ""}`}
+            >
               {isFinished ? (
-                <>Winner: <strong>{view.winner === player.role ? "YOU" : "OPPONENT"}</strong></>
+                <>
+                  Winner:{" "}
+                  <strong>{view.winner === player.role ? "YOU" : "OPPONENT"}</strong>
+                </>
               ) : isWaiting ? (
-                <>Status: <strong>WAITING</strong></>
+                <>
+                  Status: <strong>WAITING</strong>
+                </>
               ) : isPlacing ? (
-                <>Status: <strong>PLACING</strong></>
+                <>
+                  Status: <strong>PLACING</strong>
+                </>
               ) : (
-                <>Turn: <strong>{isMyTurn ? "YOU" : "OPPONENT"}</strong></>
+                <>
+                  Turn: <strong>{isMyTurn ? "YOU" : "OPPONENT"}</strong>
+                </>
               )}
             </span>
             <span className="topbar-version">v{view.version}</span>
@@ -223,16 +275,21 @@ export function GamePage() {
 
       {/* Turn / status indicator */}
       <div className="turn-indicator">
-        <span className={`turn-dot ${isFinished ? "finished" : isMyTurn ? "" : "waiting"}`} />
+        <span
+          className={`turn-dot ${isFinished ? "finished" : isMyTurn ? "" : "waiting"}`}
+        />
         <p className="turn-text">
           {isFinished ? (
             <>
-              Game over &mdash; <strong>{view.winner === player.role ? "You won!" : `${view.winner === "playerA" ? "Player 1" : "Player 2"} won`}</strong>
+              Game over &mdash;{" "}
+              <strong>
+                {view.winner === player.role
+                  ? "You won!"
+                  : `${view.winner === "playerA" ? "Player 1" : "Player 2"} won`}
+              </strong>
             </>
           ) : isWaiting ? (
-            <>
-              Waiting for opponent to join&hellip;
-            </>
+            <>Waiting for opponent to join&hellip;</>
           ) : isPlacing ? (
             <>
               Place your fleet and press <strong>Ready</strong>
@@ -249,11 +306,15 @@ export function GamePage() {
         </p>
       </div>
 
-      {/* Error / notification */}
-      {error && (
-        <p className={`notice ${error.includes("won") || error.includes("result") ? "success" : error.includes("rejected") || error.includes("Error") || error.includes("Failed") ? "error" : ""}`}>
-          {error}
-        </p>
+      {/* Notification toasts */}
+      {notifications.length > 0 && (
+        <div className="notif-stack">
+          {notifications.map((n) => (
+            <p key={n.id} className={`notif notif-${n.kind}`} onClick={() => dismissNotif(n.id)}>
+              {n.text}
+            </p>
+          ))}
+        </div>
       )}
 
       {/* Boards */}

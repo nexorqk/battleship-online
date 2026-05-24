@@ -156,7 +156,7 @@ async function updateGameState(
   });
 }
 
-async function emitViews(
+export async function emitViews(
   io: Server<ClientToServerEvents, ServerToClientEvents, InterServerEvents, SocketData>,
   gameId: string,
 ): Promise<void> {
