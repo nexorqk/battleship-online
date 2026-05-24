@@ -38,7 +38,7 @@ services:
       interval: 10s
       timeout: 3s
       retries: 6
-    command: ["sh", "-c", "pnpm db:migrate:deploy && node apps/api/dist/server.js"]
+    command: ["sh", "-c", "pnpm db:migrate:deploy && node apps/api/dist/server.cjs"]
 
   web:
     build:

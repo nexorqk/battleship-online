@@ -38,4 +38,4 @@ RUN DATABASE_URL=postgresql://postgres:postgres@localhost:5432/battleship pnpm -
 
 USER app
 EXPOSE 4000
-CMD ["node", "apps/api/dist/server.js"]
+CMD ["node", "apps/api/dist/server.cjs"]

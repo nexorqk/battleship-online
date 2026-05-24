@@ -200,12 +200,12 @@ describe("submitShot", () => {
     expect(allCells).toHaveLength(20);
 
     // Fire at every occupied cell; hits keep the turn, so A can sink everything
-    for (let i = 0; i < allCells.length; i++) {
-      const target = allCells[i];
+    let shotIndex = 0;
+    for (const target of allCells) {
       const outcome = submitShot(state, "playerA", target);
       state = outcome.state;
 
-      if (i === allCells.length - 1) {
+      if (shotIndex === allCells.length - 1) {
         expect(outcome.result).toBe("sunk");
         expect(state.phase).toBe("finished");
         expect(state.winner).toBe("playerA");
@@ -214,6 +214,7 @@ describe("submitShot", () => {
         expect(state.phase).toBe("active");
         expect(state.winner).toBeUndefined();
       }
+      shotIndex++;
     }
 
     // Verify player views in finished state
