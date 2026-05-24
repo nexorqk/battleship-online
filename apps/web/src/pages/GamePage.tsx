@@ -4,7 +4,7 @@ import { io, type Socket } from "socket.io-client";
 import { DEFAULT_FLEET, type Cell, type PlayerGameView, type Ship } from "@battleship/game-core";
 import type { ClientToServerEvents, ServerToClientEvents } from "@battleship/shared";
 import { joinGame } from "../api";
-import { SOCKET_URL } from "../config";
+import { SOCKET_URL, TURN_TIMER_SECONDS } from "../config";
 import { Board, COL_LABELS, ROW_LABELS } from "../components/Board";
 import { GameOverOverlay } from "../components/GameOverOverlay";
 import { ShipStatusBadge } from "../components/ShipStatusBadge";
@@ -31,8 +31,6 @@ type Notification = {
 
 let notifId = 0;
 
-const TURN_TIMEOUT_SEC = 60;
-
 // ===== Main Game Page =====
 
 export function GamePage() {
@@ -57,7 +55,7 @@ export function GamePage() {
   const [pendingReady, setPendingReady] = useState(false);
 
   // Turn timer state
-  const [timeLeft, setTimeLeft] = useState(TURN_TIMEOUT_SEC);
+  const [timeLeft, setTimeLeft] = useState<number | null>(TURN_TIMER_SECONDS);
   const turnRef = useRef<string | null>(null);
   const turnStartRef = useRef(Date.now());
 
@@ -207,33 +205,38 @@ export function GamePage() {
         }
       }
       setRoster(localRoster);
-    } else if (view?.phase === "placing" && view.myBoard.ships.length === 0) {
+    } else if (
+      view?.phase === "placing" &&
+      view.myBoard.ships.length === 0 &&
+      placedShips.length === 0
+    ) {
       setPlacedShips([]);
       setRoster(createFleetRoster());
       setSelectedShipIdx(null);
       setHoverCell(null);
     }
-  }, [view?.phase, view?.myBoard.ships]);
+  }, [view?.phase, view?.myBoard.ships, placedShips.length]);
 
   // ---- Turn timer ----
   useEffect(() => {
-    if (!view || view.phase !== "active") {
-      setTimeLeft(TURN_TIMEOUT_SEC);
+    if (!view || view.phase !== "active" || TURN_TIMER_SECONDS === null) {
+      setTimeLeft(TURN_TIMER_SECONDS);
       return;
     }
 
     // Reset timer on every game state change during active phase
     // (shot result, turn change, etc.)
     turnStartRef.current = Date.now();
-    setTimeLeft(TURN_TIMEOUT_SEC);
+    setTimeLeft(TURN_TIMER_SECONDS);
   }, [view?.currentTurn, view?.phase, view?.version]);
 
   useEffect(() => {
-    if (!view || view.phase !== "active") return;
+    if (!view || view.phase !== "active" || TURN_TIMER_SECONDS === null) return;
+    const timeoutSec = TURN_TIMER_SECONDS;
 
     const calcRemaining = () => {
       const elapsed = Math.floor((Date.now() - turnStartRef.current) / 1000);
-      return Math.max(0, TURN_TIMEOUT_SEC - elapsed);
+      return Math.max(0, timeoutSec - elapsed);
     };
 
     // Sync tick immediately in case the interval fires after the turn already lapsed
@@ -580,7 +583,7 @@ export function GamePage() {
         isFinished={isFinished}
         placedShipsCount={placedShips.length}
         timeLeft={timeLeft}
-        turnTimeoutSec={TURN_TIMEOUT_SEC}
+        turnTimeoutSec={TURN_TIMER_SECONDS}
       />
 
       {/* Notification toasts */}

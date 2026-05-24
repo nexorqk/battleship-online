@@ -7,8 +7,8 @@ type TurnIndicatorProps = {
   isMyTurn: boolean;
   isFinished: boolean;
   placedShipsCount: number;
-  timeLeft: number;
-  turnTimeoutSec: number;
+  timeLeft: number | null;
+  turnTimeoutSec: number | null;
 };
 
 export function TurnIndicator({
@@ -60,7 +60,7 @@ export function TurnIndicator({
       </p>
 
       {/* Timer — only during active phase */}
-      {view.phase === "active" && (
+      {view.phase === "active" && timeLeft !== null && turnTimeoutSec !== null && (
         <div className={`turn-timer ${timeLeft <= 10 ? "urgent" : ""}`}>
           <svg className="timer-ring" viewBox="0 0 40 40" width="40" height="40">
             <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.15" />

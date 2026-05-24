@@ -27,6 +27,7 @@ export async function registerGameRoutes(
       },
     });
 
+    app.log.info({ gameId: game.id }, "game created");
     reply.code(201);
 
     return {
@@ -39,44 +40,56 @@ export async function registerGameRoutes(
   app.post<{ Params: { id: string } }>("/games/:id/join", async (request, reply): Promise<JoinGameResponse> => {
     const playerToken = nanoid(32);
 
-    const existing = await prisma.game.findUnique({
-      where: { id: request.params.id },
-    });
+    try {
+      const game = await prisma.$transaction(async (tx) => {
+        const existing = await tx.game.findUnique({
+          where: { id: request.params.id },
+        });
 
-    if (!existing) {
-      return reply.code(404).send({ error: "Game not found" }) as never;
-    }
+        if (!existing) {
+          throw new Error("GAME_NOT_FOUND");
+        }
 
-    if (existing.playerBId) {
-      return reply.code(409).send({ error: "Game is already full" }) as never;
-    }
+        if (existing.playerBId) {
+          throw new Error("GAME_FULL");
+        }
 
-    const game = await prisma.$transaction(async (tx) => {
-      const nextState = markSecondPlayerJoined(getState(existing));
+        const nextState = markSecondPlayerJoined(getState(existing));
 
-      return tx.game.update({
-        where: { id: existing.id },
-        data: {
-          playerBId: playerToken,
-          state: nextState as never,
-          status: nextState.phase,
-          version: {
-            increment: 1,
+        return tx.game.update({
+          where: { id: existing.id, playerBId: null },
+          data: {
+            playerBId: playerToken,
+            state: nextState as never,
+            status: nextState.phase,
+            version: {
+              increment: 1,
+            },
           },
-        },
+        });
       });
-    });
 
-    // Notify Player A's sockets that the game phase has changed
-    await emitViews(io, game.id);
+      // Notify Player A's sockets that the game phase has changed
+      await emitViews(io, game.id);
 
-    reply.code(201);
+      app.log.info({ gameId: game.id }, "game joined");
+      reply.code(201);
 
-    return {
-      gameId: game.id,
-      playerToken,
-      role: "playerB",
-    };
+      return {
+        gameId: game.id,
+        playerToken,
+        role: "playerB",
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      if (message === "GAME_NOT_FOUND") {
+        return reply.code(404).send({ error: "Game not found" }) as never;
+      }
+      if (message === "GAME_FULL" || message.includes("Record to update not found")) {
+        return reply.code(409).send({ error: "Game is already full" }) as never;
+      }
+      throw error;
+    }
   });
 
   app.get<{ Params: { id: string }; Querystring: { playerToken?: string } }>("/games/:id", async (request, reply) => {

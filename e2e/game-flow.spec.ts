@@ -19,14 +19,15 @@ test.describe("Battleship full game flow", () => {
     await pageA.waitForURL(/\/game\//);
     const gameUrl = pageA.url();
 
-    // Verify game page loaded with placing phase
-    await pageA.waitForSelector("text=PLACING");
+    // Verify game page loaded with waiting phase (Player A is waiting for opponent)
+    await pageA.waitForSelector("text=WAITING");
 
     // --- Step 2: Player B joins via invite link ---
     await pageB.goto(gameUrl);
 
-    // Wait for Player B to see the game page
+    // Wait for Player B to see the game page, then both should transition to placing
     await pageB.waitForSelector("text=PLACING");
+    await pageA.waitForSelector("text=PLACING");
 
     // Both should see the fleet palette
     await pageA.waitForSelector("text=Your Fleet");
@@ -84,58 +85,6 @@ test.describe("Battleship full game flow", () => {
     const myBoardB = pageB.locator("section.my-board");
     await expect(myBoardB.locator(".cell.miss, .cell.hit, .cell.ship-hit")).toBeVisible({ timeout: 3000 });
 
-    // --- Step 7: Continue shooting until game ends ---
-    // Helper to shoot all cells for the current player
-    async function shootAllCells(page: any, isPlayerA: boolean) {
-      for (let i = 0; i < 100; i++) {
-        const board = page.locator("section.enemy-board");
-        const btns = board.locator("button");
-
-        // Find first clickable (empty) cell
-        const count = await btns.count();
-        let clicked = false;
-
-        for (let j = 0; j < count; j++) {
-          const btn = btns.nth(j);
-          const disabled = await btn.isDisabled();
-          if (!disabled) {
-            await btn.click();
-            clicked = true;
-            await page.waitForTimeout(150);
-
-            // Check if game finished
-            const finished = await page.locator("text=Game over").isVisible().catch(() => false);
-            if (finished) return true;
-
-            // Wait for opponent's turn to pass (they auto-shoot with timer)
-            // Actually, let the timer handle opponent's turns since we can't automate two pages simultaneously
-            if (!isPlayerA) {
-              // Player B's turn - just wait a bit for timer
-              await page.waitForTimeout(2000);
-            }
-
-            break;
-          }
-        }
-
-        if (!clicked) break;
-      }
-      return false;
-    }
-
-    // Let Player A keep shooting until timeout passes turn to B
-    // Then Player B auto-fires via timer, and turn comes back to A
-    // Continue until game ends
-    for (let round = 0; round < 5; round++) {
-      // Player A's turn — shoot
-      const finishedA = await shootAllCells(pageA, true);
-      if (finishedA) break;
-
-      // Wait for timer to expire or opponent to auto-shoot
-      // Timer is 65s on server, so we can't wait that long
-      // Instead, just verify the flow is set up correctly and end the test
-    }
-
     // Verify the game infrastructure is working
     // Check that both player views exist and are different
     const viewStateA = await pageA.locator(".topbar-version").textContent();
@@ -145,6 +94,50 @@ test.describe("Battleship full game flow", () => {
     expect(viewStateB).toBeTruthy();
 
     // Clean up
+    await contextA.close();
+    await contextB.close();
+  });
+
+  test("players can reload and resume an active game", async ({ browser }) => {
+    const contextA = await browser.newContext();
+    const contextB = await browser.newContext();
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+
+    await pageA.goto("/");
+    await pageA.click("text=Create Game");
+    await pageA.waitForURL(/\/game\//);
+    const gameUrl = pageA.url();
+
+    await pageB.goto(gameUrl);
+    await pageA.waitForSelector("text=PLACING");
+    await pageB.waitForSelector("text=PLACING");
+
+    await pageA.locator("button", { hasText: "Auto-place" }).click();
+    await pageB.locator("button", { hasText: "Auto-place" }).click();
+
+    await expect(pageA.locator("text=10 / 10 placed")).toBeVisible();
+    await expect(pageB.locator("text=10 / 10 placed")).toBeVisible();
+
+    await pageA.locator("button", { hasText: "Ready" }).click();
+    await pageB.locator("button", { hasText: "Ready" }).click();
+
+    await pageA.waitForSelector("text=YOUR TURN");
+    await pageB.waitForSelector("text=OPPONENT");
+
+    await pageA.locator("section.enemy-board button").first().click();
+    await expect(pageB.locator("section.my-board .cell.miss, section.my-board .cell.hit, section.my-board .cell.ship-hit")).toBeVisible({ timeout: 3000 });
+
+    await pageA.reload();
+    await expect(pageA.locator(".topbar-info")).toContainText("Player 1");
+    await expect(pageA.locator(".topbar-version")).toHaveText(/v\d+/);
+    await expect(pageA.locator("text=Ships sunk")).toBeVisible();
+
+    await pageB.reload();
+    await expect(pageB.locator(".topbar-info")).toContainText("Player 2");
+    await expect(pageB.locator(".topbar-version")).toHaveText(/v\d+/);
+    await expect(pageB.locator("section.my-board .cell.miss, section.my-board .cell.hit, section.my-board .cell.ship-hit")).toBeVisible({ timeout: 3000 });
+
     await contextA.close();
     await contextB.close();
   });

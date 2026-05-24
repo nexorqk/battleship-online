@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-describe("api placeholder", () => {
-  it("keeps the test command active", () => {
+describe("health placeholder", () => {
+  it("routes are tested in app.test.ts", () => {
     expect(true).toBe(true);
   });
 });

@@ -61,6 +61,30 @@ describe("submitShot", () => {
     expect(JSON.stringify(playerAView.enemyBoard)).not.toContain('"ships"');
   });
 
+  it("does not reveal unhit enemy ship coordinates in player views", () => {
+    let state = createInitialState();
+    state = markSecondPlayerJoined(state);
+    state = placeShips(state, "playerA", validShips);
+    state = placeShips(state, "playerB", validShips);
+    state = markReady(state, "playerA");
+    state = markReady(state, "playerB");
+
+    const initialView = createPlayerView(state, "playerA");
+    expect(Object.keys(initialView.enemyBoard).sort()).toEqual(["enemyReady", "myShots"]);
+    expect(JSON.stringify(initialView.enemyBoard)).not.toContain('"cells"');
+    expect(JSON.stringify(initialView.enemyBoard)).not.toContain('"id"');
+
+    const outcome = submitShot(state, "playerA", { x: 0, y: 0 });
+    const afterHitView = createPlayerView(outcome.state, "playerA");
+
+    expect(afterHitView.enemyBoard.myShots).toEqual([
+      { target: { x: 0, y: 0 }, result: "hit" },
+    ]);
+    expect(JSON.stringify(afterHitView.enemyBoard)).not.toContain('"x":1');
+    expect(JSON.stringify(afterHitView.enemyBoard)).not.toContain('"x":2');
+    expect(JSON.stringify(afterHitView.enemyBoard)).not.toContain('"x":3');
+  });
+
   it("keeps the turn on hit (classic Battleship rule)", () => {
     let state = createInitialState();
     state = markSecondPlayerJoined(state);

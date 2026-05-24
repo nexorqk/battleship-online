@@ -4,15 +4,15 @@ services:
     container_name: battleship-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: battleship
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-battleship}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - battleship_pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -24,25 +24,37 @@ services:
     container_name: battleship-api
     restart: unless-stopped
     ports:
-      - "4000:4000"
+      - "${API_PORT:-4000}:4000"
     environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/battleship
-      WEB_ORIGIN: http://localhost:5173
+      DATABASE_URL: ${API_DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/battleship}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost:5173}
       API_PORT: "4000"
+      AUTO_SHOT_TIMEOUT_MS: ${AUTO_SHOT_TIMEOUT_MS:-}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:4000/ready').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    command: ["sh", "-c", "pnpm db:migrate:deploy && node apps/api/dist/server.js"]
 
   web:
     build:
       context: .
       dockerfile: Dockerfile.web
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:4000}
+        VITE_SOCKET_URL: ${VITE_SOCKET_URL:-http://localhost:4000}
+        VITE_TURN_TIMER_SECONDS: ${VITE_TURN_TIMER_SECONDS:-}
     container_name: battleship-web
     restart: unless-stopped
     ports:
-      - "5173:80"
+      - "${WEB_PORT:-5173}:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   battleship_pg_data:

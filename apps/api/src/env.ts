@@ -1,9 +1,15 @@
 import z from "zod";
 
+const optionalPositiveInt = z.preprocess(
+  (value) => (value === "" ? undefined : value),
+  z.coerce.number().int().positive().optional(),
+);
+
 const envSchema = z.object({
   API_PORT: z.coerce.number().positive().default(4000),
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
+  AUTO_SHOT_TIMEOUT_MS: optionalPositiveInt,
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -20,4 +26,5 @@ export const env = {
   port: parsed.data.API_PORT,
   webOrigin: parsed.data.WEB_ORIGIN,
   databaseUrl: parsed.data.DATABASE_URL,
+  autoShotTimeoutMs: parsed.data.AUTO_SHOT_TIMEOUT_MS,
 };

@@ -10,7 +10,8 @@ COPY apps/api/package.json apps/api/
 RUN pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm build --filter @battleship/api...
+RUN DATABASE_URL=postgresql://postgres:postgres@localhost:5432/battleship pnpm --filter @battleship/db prisma:generate
+RUN pnpm --filter @battleship/api... build
 
 # --- Production image ---
 FROM node:24-alpine
@@ -33,6 +34,7 @@ COPY --from=builder /app/apps/api/dist apps/api/dist
 COPY --from=builder /app/apps/api/package.json apps/api/
 
 RUN pnpm install --frozen-lockfile --prod
+RUN DATABASE_URL=postgresql://postgres:postgres@localhost:5432/battleship pnpm --filter @battleship/db prisma:generate
 
 USER app
 EXPOSE 4000
