@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { io, type Socket } from "socket.io-client";
 import { DEFAULT_FLEET, type Cell, type PlayerGameView, type Ship } from "@battleship/game-core";
 import type { ClientToServerEvents, ServerToClientEvents } from "@battleship/shared";
 import { joinGame } from "../api";
 import { SOCKET_URL } from "../config";
-import { Board } from "../components/Board";
+import { Board, COL_LABELS, ROW_LABELS } from "../components/Board";
+import { GameOverOverlay } from "../components/GameOverOverlay";
+import { ShipStatusBadge } from "../components/ShipStatusBadge";
+import { TurnIndicator } from "../components/TurnIndicator";
 import { createAutoFleet } from "../fixtures";
 import { getStoredPlayer, storePlayer, type StoredPlayer } from "../storage";
 import {
@@ -30,104 +33,6 @@ let notifId = 0;
 
 const TURN_TIMEOUT_SEC = 60;
 
-// ----- Game Over Overlay -----
-
-function GameOverOverlay({
-  won,
-  myShipsRemaining,
-  totalMyShips,
-  enemyShipsSunk,
-  totalEnemyShips,
-  onNewGame,
-}: {
-  won: boolean;
-  myShipsRemaining: number;
-  totalMyShips: number;
-  enemyShipsSunk: number;
-  totalEnemyShips: number;
-  onNewGame: () => void;
-}) {
-  return (
-    <div className="overlay-backdrop">
-      <div className="overlay-card">
-        <div className={`overlay-icon ${won ? "victory" : "defeat"}`}>
-          {won ? (
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5C7 4 7 7 6 9Z" />
-              <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5C17 4 17 7 18 9Z" />
-              <path d="M4 22h16" />
-              <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22" />
-              <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22" />
-              <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z" />
-            </svg>
-          ) : (
-            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M16 16s-1.5-2-4-2-4 2-4 2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
-            </svg>
-          )}
-        </div>
-
-        <h2 className={`overlay-title ${won ? "victory" : "defeat"}`}>
-          {won ? "VICTORY" : "DEFEAT"}
-        </h2>
-
-        <p className="overlay-subtitle">
-          {won
-            ? "You destroyed the enemy fleet!"
-            : "Your fleet has been destroyed."}
-        </p>
-
-        <div className="overlay-stats">
-          <div className="overlay-stat">
-            <span className="overlay-stat-value">{myShipsRemaining}</span>
-            <span className="overlay-stat-label">Your ships<br />remaining</span>
-          </div>
-          <div className="overlay-stat">
-            <span className="overlay-stat-value">{enemyShipsSunk}</span>
-            <span className="overlay-stat-label">Enemy ships<br />sunk</span>
-          </div>
-          <div className="overlay-stat">
-            <span className="overlay-stat-value">{totalMyShips - myShipsRemaining}</span>
-            <span className="overlay-stat-label">Your ships<br />lost</span>
-          </div>
-        </div>
-
-        <button className="btn-primary overlay-btn" onClick={onNewGame}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10" />
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-          </svg>
-          New Game
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ----- Ship Status Badge -----
-
-function ShipStatusBadge({ sunk, total }: { sunk: number; total: number }) {
-  return (
-    <div className="ship-status">
-      <span className="ship-status-label">Ships sunk</span>
-      <span className="ship-status-value">
-        <span className="ship-status-current">{sunk}</span>
-        <span className="ship-status-sep">/</span>
-        <span className="ship-status-total">{total}</span>
-      </span>
-      <div className="ship-status-bar">
-        <div
-          className="ship-status-fill"
-          style={{ width: `${(sunk / total) * 100}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 // ===== Main Game Page =====
 
 export function GamePage() {
@@ -136,6 +41,8 @@ export function GamePage() {
   const [player, setPlayer] = useState<StoredPlayer | null>(() =>
     gameId ? getStoredPlayer(gameId) : null,
   );
+  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinRetry, setJoinRetry] = useState(0);
   const [view, setView] = useState<(PlayerGameView & { version: number }) | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [copied, setCopied] = useState(false);
@@ -153,6 +60,12 @@ export function GamePage() {
   const [timeLeft, setTimeLeft] = useState(TURN_TIMEOUT_SEC);
   const turnRef = useRef<string | null>(null);
   const turnStartRef = useRef(Date.now());
+
+  // Shot splash animation keys
+  const [enemyShotKey, setEnemyShotKey] = useState(0);
+  const [myShotKey, setMyShotKey] = useState(0);
+  const prevEnemyShotsLen = useRef(0);
+  const prevMyShotsLen = useRef(0);
 
   const inviteUrl = useMemo(() => window.location.href, []);
 
@@ -176,6 +89,8 @@ export function GamePage() {
 
     let cancelled = false;
 
+    setJoinError(null);
+
     joinGame(gameId)
       .then((joined) => {
         if (cancelled) return;
@@ -188,16 +103,15 @@ export function GamePage() {
       })
       .catch((reason) => {
         if (cancelled) return;
-        pushNotif(
-          reason instanceof Error ? reason.message : "Failed to join game",
-          "error",
-        );
+        const message =
+          reason instanceof Error ? reason.message : "Failed to join game";
+        setJoinError(message);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [gameId, player, pushNotif]);
+  }, [gameId, player, joinRetry]);
 
   // Socket.IO connection
   useEffect(() => {
@@ -266,6 +180,19 @@ export function GamePage() {
     };
   }, [gameId, player, pushNotif, pendingReady]);
 
+  // Increment shot animation keys when new shots arrive
+  useEffect(() => {
+    if (!view) return;
+    if (view.enemyBoard.myShots.length !== prevEnemyShotsLen.current) {
+      prevEnemyShotsLen.current = view.enemyBoard.myShots.length;
+      setEnemyShotKey((k) => k + 1);
+    }
+    if (view.myBoard.shotsReceived.length !== prevMyShotsLen.current) {
+      prevMyShotsLen.current = view.myBoard.shotsReceived.length;
+      setMyShotKey((k) => k + 1);
+    }
+  }, [view?.enemyBoard.myShots.length, view?.myBoard.shotsReceived.length]);
+
   // Reset placement state when entering placing phase from server state
   useEffect(() => {
     if (view?.phase === "placing" && view.myBoard.ships.length > 0) {
@@ -295,24 +222,29 @@ export function GamePage() {
       return;
     }
 
-    if (turnRef.current !== view.currentTurn) {
-      turnRef.current = view.currentTurn;
-      turnStartRef.current = Date.now();
-      setTimeLeft(TURN_TIMEOUT_SEC);
-    }
-  }, [view?.currentTurn, view?.phase]);
+    // Reset timer on every game state change during active phase
+    // (shot result, turn change, etc.)
+    turnStartRef.current = Date.now();
+    setTimeLeft(TURN_TIMEOUT_SEC);
+  }, [view?.currentTurn, view?.phase, view?.version]);
 
   useEffect(() => {
     if (!view || view.phase !== "active") return;
 
-    const interval = setInterval(() => {
+    const calcRemaining = () => {
       const elapsed = Math.floor((Date.now() - turnStartRef.current) / 1000);
-      const remaining = Math.max(0, TURN_TIMEOUT_SEC - elapsed);
-      setTimeLeft(remaining);
+      return Math.max(0, TURN_TIMEOUT_SEC - elapsed);
+    };
+
+    // Sync tick immediately in case the interval fires after the turn already lapsed
+    setTimeLeft(calcRemaining());
+
+    const interval = setInterval(() => {
+      setTimeLeft(calcRemaining());
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [view?.currentTurn, view?.phase]);
+  }, [view?.currentTurn, view?.phase, view?.version]);
 
   // ---- Derived computed stats ----
   const enemyShipsSunk = useMemo(() => {
@@ -471,6 +403,9 @@ export function GamePage() {
         <div className="loading-state">
           <div className="loading-spinner" />
           <p className="loading-text">Invalid game link</p>
+          <button className="btn-action" style={{ marginTop: 16 }} onClick={() => navigate("/")}>
+            Create New Game
+          </button>
         </div>
       </main>
     );
@@ -480,8 +415,30 @@ export function GamePage() {
     return (
       <main className="game-page">
         <div className="loading-state">
-          <div className="loading-spinner" />
-          <p className="loading-text">Joining game&hellip;</p>
+          {joinError ? (
+            <>
+              <p className="loading-text loading-error">{joinError}</p>
+              <div className="loading-actions">
+                <button
+                  className="btn-action"
+                  onClick={() => {
+                    setJoinError(null);
+                    setJoinRetry((c) => c + 1);
+                  }}
+                >
+                  Try Again
+                </button>
+                <button className="btn-action primary-action" onClick={() => navigate("/")}>
+                  Create New Game
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="loading-spinner" />
+              <p className="loading-text">Joining game&hellip;</p>
+            </>
+          )}
         </div>
       </main>
     );
@@ -491,7 +448,47 @@ export function GamePage() {
     return (
       <main className="game-page">
         <div className="loading-state">
-          <div className="loading-spinner" />
+          <div aria-hidden="true" className="loading-skeleton-wrapper">
+            <div className="loading-skeleton-topbar" />
+            <div className="boards-wrapper loading-skeleton">
+              <div className="board-section">
+                <div className="board-grid skeleton-grid">
+                  <div className="coord-label corner" />
+                  {COL_LABELS.map((label) => (
+                    <div key={label} className="coord-label col-label">
+                      {label}
+                    </div>
+                  ))}
+                  {ROW_LABELS.map((rowLabel, y) => (
+                    <Fragment key={y}>
+                      <div className="coord-label row-label">{rowLabel}</div>
+                      {COL_LABELS.map((_, x) => (
+                        <div key={x} className="skeleton-cell" />
+                      ))}
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+              <div className="board-section">
+                <div className="board-grid skeleton-grid">
+                  <div className="coord-label corner" />
+                  {COL_LABELS.map((label) => (
+                    <div key={label} className="coord-label col-label">
+                      {label}
+                    </div>
+                  ))}
+                  {ROW_LABELS.map((rowLabel, y) => (
+                    <Fragment key={y}>
+                      <div className="coord-label row-label">{rowLabel}</div>
+                      {COL_LABELS.map((_, x) => (
+                        <div key={x} className="skeleton-cell" />
+                      ))}
+                    </Fragment>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
           <p className="loading-text">Loading game state&hellip;</p>
         </div>
       </main>
@@ -576,61 +573,15 @@ export function GamePage() {
       </header>
 
       {/* Turn / status indicator */}
-      <div className="turn-indicator">
-        <span
-          className={`turn-dot ${isFinished ? "finished" : isMyTurn ? "" : "waiting"}`}
-        />
-        <p className="turn-text">
-          {isFinished ? (
-            <>
-              Game over &mdash;{" "}
-              <strong>
-                {view.winner === player.role
-                  ? "You won!"
-                  : `${view.winner === "playerA" ? "Player 1" : "Player 2"} won`}
-              </strong>
-            </>
-          ) : isWaiting ? (
-            <>Waiting for opponent to join&hellip;</>
-          ) : isPlacing ? (
-            <>
-              {placedShips.length === 0
-                ? "Select a ship below, then click the board to place it"
-                : placedShips.length < 10
-                  ? `Place ${10 - placedShips.length} more ship${10 - placedShips.length > 1 ? "s" : ""}`
-                  : "All ships placed. Press Ready to start the battle."}
-            </>
-          ) : isMyTurn ? (
-            <>
-              Your turn &mdash; select a target on the enemy board
-            </>
-          ) : (
-            <>
-              Opponent&apos;s turn &mdash; wait for their move
-            </>
-          )}
-        </p>
-
-        {/* Timer — only during active phase */}
-        {view.phase === "active" && (
-          <div className={`turn-timer ${timeLeft <= 10 ? "urgent" : ""}`}>
-            <svg className="timer-ring" viewBox="0 0 40 40" width="40" height="40">
-              <circle cx="20" cy="20" r="17" fill="none" stroke="currentColor" strokeWidth="3" opacity="0.15" />
-              <circle
-                cx="20" cy="20" r="17"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="3"
-                strokeLinecap="round"
-                strokeDasharray={`${(timeLeft / TURN_TIMEOUT_SEC) * 107} 107`}
-                transform="rotate(-90 20 20)"
-                className="timer-ring-fill"
-              />
-            </svg>
-            <span className="timer-text">{timeLeft}</span>
-          </div>
-        )}
-      </div>
+      <TurnIndicator
+        view={view}
+        player={player}
+        isMyTurn={isMyTurn}
+        isFinished={isFinished}
+        placedShipsCount={placedShips.length}
+        timeLeft={timeLeft}
+        turnTimeoutSec={TURN_TIMEOUT_SEC}
+      />
 
       {/* Notification toasts */}
       {notifications.length > 0 && (
@@ -662,6 +613,7 @@ export function GamePage() {
             previewValid={previewValid}
             onCellHover={handleCellHover}
             onCellClick={handleBoardClick}
+            animationKey={myShotKey}
           />
 
           {/* Ship palette — only during placing phase */}
@@ -727,8 +679,10 @@ export function GamePage() {
             shots={view.enemyBoard.myShots}
             disabled={!canShoot}
             isEnemy
+            activeTurn={canShoot}
             enemyReady={view.enemyBoard.enemyReady}
             onCellClick={handleShoot}
+            animationKey={enemyShotKey}
           />
 
           {/* Ship status — during active/completed phase */}

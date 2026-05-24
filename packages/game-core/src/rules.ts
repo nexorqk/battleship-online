@@ -206,7 +206,7 @@ export function submitShot(state: GameState, shooter: Role, target: Cell): ShotO
     ...state,
     phase: allDefenderShipsSunk ? "finished" : "active",
     winner: allDefenderShipsSunk ? shooter : undefined,
-    currentTurn: allDefenderShipsSunk ? state.currentTurn : defender,
+    currentTurn: allDefenderShipsSunk ? state.currentTurn : (result === "miss" ? defender : shooter),
     boards: {
       ...state.boards,
       [defender]: {

@@ -6,14 +6,16 @@
   "scripts": {
     "dev": "pnpm --parallel --filter @battleship/api --filter @battleship/web dev",
     "build": "pnpm -r build",
+    "start": "pnpm --filter @battleship/api start",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "db:generate": "pnpm --filter @battleship/db prisma:generate",
     "db:migrate": "pnpm --filter @battleship/db prisma:migrate",
+    "db:migrate:deploy": "pnpm --filter @battleship/db prisma:migrate:deploy",
     "db:studio": "pnpm --filter @battleship/db prisma:studio",
     "test:e2e": "pnpm exec playwright test"
   },
   "devDependencies": {
-    "typescript": "^5.6.3"
+    "typescript": "^6.0.3"
   }
 }

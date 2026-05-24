@@ -1,0 +1,39 @@
+FROM node:24-alpine AS builder
+RUN npm install -g pnpm@9.12.0
+
+WORKDIR /app
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/db/package.json packages/db/
+COPY packages/game-core/package.json packages/game-core/
+COPY packages/shared/package.json packages/shared/
+COPY apps/api/package.json apps/api/
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build --filter @battleship/api...
+
+# --- Production image ---
+FROM node:24-alpine
+RUN npm install -g pnpm@9.12.0 && \
+  addgroup --system app && \
+  adduser --system --ingroup app app
+
+WORKDIR /app
+
+COPY --from=builder /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
+COPY --from=builder /app/packages/db/dist packages/db/dist
+COPY --from=builder /app/packages/db/prisma packages/db/prisma
+COPY --from=builder /app/packages/db/prisma.config.js packages/db/
+COPY --from=builder /app/packages/db/package.json packages/db/
+COPY --from=builder /app/packages/game-core/dist packages/game-core/dist
+COPY --from=builder /app/packages/game-core/package.json packages/game-core/
+COPY --from=builder /app/packages/shared/dist packages/shared/dist
+COPY --from=builder /app/packages/shared/package.json packages/shared/
+COPY --from=builder /app/apps/api/dist apps/api/dist
+COPY --from=builder /app/apps/api/package.json apps/api/
+
+RUN pnpm install --frozen-lockfile --prod
+
+USER app
+EXPOSE 4000
+CMD ["node", "apps/api/dist/server.js"]

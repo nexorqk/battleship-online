@@ -39,19 +39,19 @@ export async function registerGameRoutes(
   app.post<{ Params: { id: string } }>("/games/:id/join", async (request, reply): Promise<JoinGameResponse> => {
     const playerToken = nanoid(32);
 
+    const existing = await prisma.game.findUnique({
+      where: { id: request.params.id },
+    });
+
+    if (!existing) {
+      return reply.code(404).send({ error: "Game not found" }) as never;
+    }
+
+    if (existing.playerBId) {
+      return reply.code(409).send({ error: "Game is already full" }) as never;
+    }
+
     const game = await prisma.$transaction(async (tx) => {
-      const existing = await tx.game.findUnique({
-        where: { id: request.params.id },
-      });
-
-      if (!existing) {
-        throw new Error("GAME_NOT_FOUND");
-      }
-
-      if (existing.playerBId) {
-        throw new Error("GAME_ALREADY_FULL");
-      }
-
       const nextState = markSecondPlayerJoined(getState(existing));
 
       return tx.game.update({
@@ -79,10 +79,14 @@ export async function registerGameRoutes(
     };
   });
 
-  app.get<{ Params: { id: string }; Querystring: { playerToken?: string } }>("/games/:id", async (request) => {
-    const game = await prisma.game.findUniqueOrThrow({
+  app.get<{ Params: { id: string }; Querystring: { playerToken?: string } }>("/games/:id", async (request, reply) => {
+    const game = await prisma.game.findUnique({
       where: { id: request.params.id },
     });
+
+    if (!game) {
+      return reply.code(404).send({ error: "Game not found" }) as never;
+    }
 
     if (!request.query.playerToken) {
       return {

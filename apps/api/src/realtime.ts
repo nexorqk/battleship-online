@@ -116,7 +116,7 @@ async function autoFireShot(
       scheduleTurnTimer(io, gameId);
     }
   } catch (error) {
-    console.error(`[turn-timer] Auto-shot failed for game ${gameId}:`, errorMessage(error));
+    console.error(`[auto-shot] Failed for game ${gameId}:`, errorMessage(error));
   }
 }
 
@@ -140,7 +140,7 @@ async function scheduleTurnTimerIfActive(
       scheduleTurnTimer(io, gameId);
     }
   } catch {
-    // Game not found — nothing to schedule
+    // Game not found — nothing to schedule (common race on cleanup)
   }
 }
 
